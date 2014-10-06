@@ -311,7 +311,8 @@ class DtwSom(Som):
         between them and using linear interpolation for compression."""
         # In the model adaptation the length of the new model vector sequence is determined first
         avg_length = int(0.5 + (hm * M.shape[0] + hx * X.shape[0]))
-        assert (M.shape[0] <= avg_length <= X.shape[0]) or (X.shape[0] <= avg_length <= M.shape[0])
+        if not (M.shape[0] <= avg_length <= X.shape[0]) or (X.shape[0] <= avg_length <= M.shape[0]):
+            raise ValueError("Something went wrong with averaging the time series.")
         # then the matching vectors of the input Xt and old model vector sequence Mk
         # are averaged along the warping function F
         _, _, (x_arr, y_arr) = self.dtw_fn(X, M, dist_only=False)
@@ -321,7 +322,8 @@ class DtwSom(Som):
             positions[p] = hm * j + hx * i
         # next we interpolate the distances into the new vector
         M_ = resample(positions, averaged_path, avg_length)
-        assert np.isnan(np.dot(M_, M_)) == False, (x_arr, y_arr, M_, positions, averaged_path, hm, hx)
+        if not np.isnan(np.dot(M_, M_)) == False:
+            raise ValueError("Something went wrong with interpolation, nan-values...")#(x_arr, y_arr, M_, positions, averaged_path, hm, hx)
         logging.debug("Min / Max value after interpolation: %.4f / %.4f" % (M_.min(), M_.max()))
         return M_
 
