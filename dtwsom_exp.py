@@ -57,9 +57,9 @@ def experiment(args):
         x, y, sigma, slope, learning_rate, constraint, window, training_procedure, initialization_procedure)
     experiment_name = os.path.join(parser.get("data", "outputdir"), experiment_name)
     som.plot(kind='hinton', data=data, fp=experiment_name + '-hinton.pdf')
-    som.plot(kind='grid', what='prototypes', normalize_scale=True, fp=experiment_name + '-proto-grid.pdf')
+    som.plot(kind='grid', what='prototypes', normalize_scale=False, fp=experiment_name + '-proto-grid.pdf')
     som.plot(kind='dmap', fp=experiment_name + '-umatrix.pdf')
-    som.plot(kind='grid', what='obs', data=characters, normalize_scale=True, fp=experiment_name + '-obs-grid.pdf')
+    som.plot(kind='grid', what='obs', data=characters, normalize_scale=False, fp=experiment_name + '-obs-grid.pdf')
 
 def parse_range(field):
     if ':' in field:

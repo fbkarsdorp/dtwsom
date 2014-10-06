@@ -4,6 +4,7 @@ import matplotlib.cm as cm
 
 def hinton(matrix, max_weight=None, ax=None):
     """Draw Hinton diagram for visualizing a weight matrix."""
+    matrix = matrix.T
     fig, ax = plt.subplots()
     if not max_weight:
         max_weight = 2**np.ceil(np.log(np.abs(matrix).max())/np.log(2))
@@ -21,8 +22,7 @@ def hinton(matrix, max_weight=None, ax=None):
         ax.add_patch(rect)
 
     ax.autoscale_view()
-    # ax.invert_yaxis()
-    ax.invert_xaxis()
+    ax.invert_yaxis()
 
 def plot_distance_map(matrix, interpolation='bilinear', ax=None):
     fig = plt.figure()
