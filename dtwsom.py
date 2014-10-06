@@ -21,6 +21,12 @@ from somplot import plot_distance_map, hinton
 
 # logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
 
+def median_example(examples, dtw_fn):
+    dm = np.zeros((len(examples), len(examples)))
+    for i in range(len(examples)):
+        for j in range(i):
+            dm[j, i] = dm[i, j] = dtw_fn(examples[i], examples[j])
+    np.argmin(dm / dm.sum(1))
 
 def normalize(signal, minimum=None, maximum=None):
     """Normalize a signal to the range 0, 1"""

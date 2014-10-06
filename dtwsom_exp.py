@@ -76,15 +76,16 @@ for size in parse_range(parser.get("som", "size")):
     sigma = size / 3. if sigma == 'relative' else float(sigma)
     for lr in parse_range(parser.get("som", 'learning-rate')):
         for slope in parse_range(parser.get("som", "slope")):
-            params.append([size, size, sigma, slope, lr, 
-                          parser.get("dtw", "constraint"),
-                          int(parser.get("dtw", "window")),
-                          int(parser.get("som", "seed")),
-                          int(parser.get("dtw", "step-pattern")),
-                          int(parser.get("som", "iterations")),
-                          characters,
-                          parser.get("som", "training-procedure"),
-                          parser.get("som", "init-weights")])
+            for window in parse_range(parser.get("dtw", "window")):
+                params.append([size, size, sigma, slope, lr, 
+                              parser.get("dtw", "constraint"),
+                              window,
+                              int(parser.get("som", "seed")),
+                              int(parser.get("dtw", "step-pattern")),
+                              int(parser.get("som", "iterations")),
+                              characters,
+                              parser.get("som", "training-procedure"),
+                              parser.get("som", "init-weights")])
 
 n_jobs = int(parser.get('general', 'n-jobs'))
 pool = Pool(n_jobs)
