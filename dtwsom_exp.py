@@ -1,4 +1,5 @@
 import glob
+import os
 
 import ConfigParser
 import logging
@@ -45,6 +46,7 @@ def experiment(args):
         raise ValueError("Training procedure '%s' is not supported." % training_procedure)
     experiment_name = '%sx%s-sigma.%.2f-slope.%.2f-lr.%.2f-constraint.%s-window.%s-tp.%s-ip.%s' % (
         x, y, sigma, slope, learning_rate, constraint, window, training_procedure, initialization_procedure)
+    experiment_name = os.path.join(parser.get("general", "outputdir"), experiment_name)
     som.plot(kind='hinton', data=data, fp=experiment_name + '-hinton.pdf')
     som.plot(kind='grid', what='prototypes', normalize_scale=True, fp=experiment_name + '-proto-grid.pdf')
     som.plot(kind='dmap', fp=experiment_name + '-umatrix.pdf')
