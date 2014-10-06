@@ -3,9 +3,9 @@ import glob
 import ConfigParser
 import logging
 import matplotlib
-import matplotlib.pyplot as plt 
-
 matplotlib.use('Agg')
+
+import matplotlib.pyplot as plt 
 
 from storypy import Story
 from dtwsom import DtwSom
@@ -19,7 +19,7 @@ parser.read("dtwexp.config")
 
 verbosity = int(parser.get("general", "verbosity"))
 logging_level = logging.INFO if verbosity == 1 else logging.DEBUG if verbosity > 1 else logging.WARN
-logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging_info)
+logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging_level)
 
 # read the data into memory
 filenames = glob.glob(parser.get("data", "collection"))
