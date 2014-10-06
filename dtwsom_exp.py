@@ -28,7 +28,7 @@ stories = map(Story.load, filenames)
 characters, names = [], []
 for story in stories:
     for actor, occurrences in story.to_dataframe().iterrows():
-        if occurrences.sum() > 0:
+        if occurrences.max() == 1:
             characters.append(occurrences.values)
             names.append(actor)
 
