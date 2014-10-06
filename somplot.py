@@ -23,8 +23,10 @@ def hinton(matrix, max_weight=None, ax=None):
 
     ax.autoscale_view()
     ax.invert_yaxis()
+    return fig
 
 def plot_distance_map(matrix, interpolation='bilinear', ax=None):
     fig = plt.figure()
     plt.imshow(matrix, interpolation=interpolation, cmap=cm.RdYlGn,
               vmax=abs(matrix).max(), vmin=-abs(matrix).max())
+    return fig

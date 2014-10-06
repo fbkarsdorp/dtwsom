@@ -22,11 +22,13 @@ from somplot import plot_distance_map, hinton
 # logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
 
 def median_example(examples, dtw_fn):
+    if len(examples) == 1:
+        return 0
     dm = np.zeros((len(examples), len(examples)))
     for i in range(len(examples)):
         for j in range(i):
             dm[j, i] = dm[i, j] = dtw_fn(examples[i], examples[j])
-    np.argmin(dm / dm.sum(1))
+    return np.argmin(dm.sum(1) / dm.shape[0])
 
 def normalize(signal, minimum=None, maximum=None):
     """Normalize a signal to the range 0, 1"""
@@ -242,7 +244,7 @@ class Som(object):
                 raise ValueError("Must supply raw data points.")
             wm = self.win_map(data, dist=True)
             for (i, j), value in wm.iteritems():
-                points[i][j] = min(value, key=lambda i: i[1])[0]
+                points[i][j] = value[median_example(value, self.dtw_fn)]
         for i in range(self.x):
             for j in range(self.y):
                 ax = plt.Subplot(fig, outer_grid[cnt])
@@ -257,21 +259,23 @@ class Som(object):
                     ax.set_xlim(0, width)
                 fig.add_subplot(ax)
                 cnt += 1
+        return fig
 
     def plot(self, t=0, what='prototypes', data=None, kind='grid', normalize_scale=True, fp=""):
         if kind == 'grid':
-            self._plot_grid(what=what, data=data, normalize_scale=normalize_scale)
+            fig = self._plot_grid(what=what, data=data, normalize_scale=normalize_scale)
         elif kind == 'dmap':
-            plot_distance_map(self.distance_map())
+            fig = plot_distance_map(self.distance_map())
         elif kind == 'hinton':
             if data is None:
                 raise ValueError("Must supply raw data points.")
             ar = self.activation_response(data)
-            hinton(ar / np.linalg.norm(ar))
+            fig = hinton(ar / np.linalg.norm(ar))
         else:
             raise ValueError("Plot type '%s' is not supported." % kind)
         if fp:
             plt.savefig(fp)
+        fig.close()
 
 
 class DtwSom(Som):
