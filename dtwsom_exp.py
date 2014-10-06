@@ -13,7 +13,7 @@ from dtwsom import DtwSom
 import numpy as np
 from multiprocessing import Pool
 
-
+plt.ioff()
 
 parser = ConfigParser.ConfigParser()
 parser.read("dtwexp.config")
