@@ -275,7 +275,7 @@ class Som(object):
             raise ValueError("Plot type '%s' is not supported." % kind)
         if fp:
             plt.savefig(fp)
-        fig.close()
+        plt.close(fig)
 
 
 class DtwSom(Som):
