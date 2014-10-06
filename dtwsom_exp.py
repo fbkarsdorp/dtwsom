@@ -71,7 +71,7 @@ for size in parse_range(parser.get("som", "size")):
                           int(parser.get("som", "seed")),
                           int(parser.get("dtw", "step-pattern")),
                           int(parser.get("som", "iterations")),
-                          characters[:100],
+                          characters,
                           parser.get("som", "training-procedure"),
                           parser.get("som", "init-weights")])
 
