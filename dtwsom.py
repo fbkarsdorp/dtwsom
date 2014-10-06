@@ -213,6 +213,7 @@ class Som(object):
         that have been mapped in the position i,j."""
         winmap = defaultdict(list)
         for x in data:
+            assert x.max() > 0
             i, j = self.winner(x)
             if dist:
                 winmap[i, j].append((x, self.activation_map[i, j]))
