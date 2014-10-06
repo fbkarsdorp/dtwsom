@@ -233,7 +233,7 @@ class Som(object):
             points = [[None for i in range(self.x)] for j in range(self.y)]
             if data is None:
                 raise ValueError("Must supply raw data points.")
-            wm = self.win_map(data)
+            wm = self.win_map(data, dist=True)
             for (i, j), value in wm.iteritems():
                 points[i][j] = min(value, key=lambda i: i[1])[0]
         for i in range(self.x):
