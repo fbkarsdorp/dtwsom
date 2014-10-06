@@ -28,8 +28,9 @@ stories = map(Story.load, filenames)
 characters, names = [], []
 for story in stories:
     for actor, occurrences in story.to_dataframe().iterrows():
-        characters.append(occurrences.values)
-        names.append(actor)
+        if occurrences.sum() > 0:
+            characters.append(occurrences.values)
+            names.append(actor)
 
 def experiment(args):
     (x, y, sigma, slope, learning_rate, constraint, window, random_seed, step_pattern, iterations, data, training_procedure, initialization_procedure) = args
