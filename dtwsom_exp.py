@@ -12,10 +12,14 @@ from dtwsom import DtwSom
 import numpy as np
 from multiprocessing import Pool
 
-logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.WARN)
+
 
 parser = ConfigParser.ConfigParser()
 parser.read("dtwexp.config")
+
+verbosity = int(parser.get("general", "verbosity"))
+logging_level = logging.INFO if verbosity == 1 else logging.DEBUG if verbosity > 1 else logging.WARN
+logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging_info)
 
 # read the data into memory
 filenames = glob.glob(parser.get("data", "collection"))
