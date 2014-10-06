@@ -21,7 +21,7 @@ def hinton(matrix, max_weight=None, ax=None):
         ax.add_patch(rect)
 
     ax.autoscale_view()
-    ax.invert_yaxis()
+    # ax.invert_yaxis()
     ax.invert_xaxis()
 
 def plot_distance_map(matrix, interpolation='bilinear', ax=None):
