@@ -39,9 +39,17 @@ def experiment(args):
     if initialization_procedure == 'obs':
         som.random_weights_init(data)
     if training_procedure == 'random':
-        som.train_random(data, iterations)
+        try:
+            som.train_random(data, iterations)
+        except ValueError, err:
+            print err
+            return
     elif training_procedure == 'batch':
-        som.train_batch(data, iterations)
+        try:
+            som.train_batch(data, iterations)
+        except ValueError, err:
+            print err
+            return
     else:
         raise ValueError("Training procedure '%s' is not supported." % training_procedure)
     experiment_name = '%sx%s-sigma.%.2f-slope.%.2f-lr.%.2f-constraint.%s-window.%s-tp.%s-ip.%s' % (
