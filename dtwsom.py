@@ -40,7 +40,7 @@ def resample(ts, values, num_samples):
     """Convert a list of times and a list of values to evenly
     spaced samples with linear interpolation."""
     ts = normalize(ts)
-    return np.interp(np.linspace(0.0, 1.0, num_samples), ts, values)
+    return normalize(np.interp(np.linspace(0.0, 1.0, num_samples), ts, values))
 
 
 # the Som class is almost a plain copy of MiniSom 
@@ -312,7 +312,7 @@ class DtwSom(Som):
         # In the model adaptation the length of the new model vector sequence is determined first
         avg_length = int(0.5 + (hm * M.shape[0] + hx * X.shape[0]))
         if not ((M.shape[0] <= avg_length <= X.shape[0]) or (X.shape[0] <= avg_length <= M.shape[0])):
-            raise ValueError("Something went wrong with averaging the time series.")
+            raise ValueError("Something went wrong with averaging the time series. (hx:%s, hm:%s, l=%d)" % (hx, hm, avg_length))
         # then the matching vectors of the input Xt and old model vector sequence Mk
         # are averaged along the warping function F
         _, _, (x_arr, y_arr) = self.dtw_fn(X, M, dist_only=False)
