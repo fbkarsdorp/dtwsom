@@ -87,9 +87,9 @@ for size in parse_range(parser.get("som", "size")):
                               parser.get("som", "training-procedure"),
                               parser.get("som", "init-weights")])
 
-# n_jobs = int(parser.get('general', 'n-jobs'))
-# pool = Pool(n_jobs)
-# pool.map(experiment, params, chunksize=len(params) / n_jobs)
-# pool.close()
-# pool.join()
-experiment(params[0])
+n_jobs = int(parser.get('general', 'n-jobs'))
+pool = Pool(n_jobs)
+pool.map(experiment, params, chunksize=len(params) / n_jobs)
+pool.close()
+pool.join()
+# experiment(params[0])
