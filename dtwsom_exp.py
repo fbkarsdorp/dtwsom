@@ -2,13 +2,14 @@ import glob
 
 import ConfigParser
 import logging
+import matplotlib
+import matplotlib.pyplot as plt 
+
+matplotlib.use('Agg')
+
 from storypy import Story
 from dtwsom import DtwSom
 import numpy as np
-import matplotlib.pyplot as plt 
-
-plt.ioff()
-
 from multiprocessing import Pool
 
 logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.WARN)
