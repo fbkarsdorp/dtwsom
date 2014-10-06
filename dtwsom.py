@@ -202,12 +202,16 @@ class Som(object):
             error += np.linalg.norm(x - self.weights[i][j])
         return error / len(data)
 
-    def win_map(self, data):
+    def win_map(self, data, dist=False):
         """Returns a dictionary wm where wm[(i,j)] is a list with all the patterns
         that have been mapped in the position i,j."""
         winmap = defaultdict(list)
         for x in data:
-            winmap[self.winner(x)].append(x)
+            i, j = self.winner(x)
+            if dist:
+                winmap[i, j].append((x, self.activation_map[i, j]))
+            else:
+                winmap[i, j].append(x)
         return dict(winmap)
 
     def _cluster(self, method='average', t=0.6):
@@ -231,7 +235,7 @@ class Som(object):
                 raise ValueError("Must supply raw data points.")
             wm = self.win_map(data)
             for (i, j), value in wm.iteritems():
-                points[i][j] = value[int(round(self.random_generator.rand() * len(value)-1))]
+                points[i][j] = min(value, key=lambda i: i[1])[0]
         for i in range(self.x):
             for j in range(self.y):
                 ax = plt.Subplot(fig, outer_grid[cnt])
