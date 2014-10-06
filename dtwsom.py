@@ -242,7 +242,7 @@ class Som(object):
             points = [[None for i in range(self.x)] for j in range(self.y)]
             if data is None:
                 raise ValueError("Must supply raw data points.")
-            wm = self.win_map(data, dist=True)
+            wm = self.win_map(data)
             for (i, j), value in wm.iteritems():
                 points[i][j] = value[median_example(value, self.dtw_fn)]
         for i in range(self.x):
