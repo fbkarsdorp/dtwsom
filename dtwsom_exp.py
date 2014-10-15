@@ -3,17 +3,12 @@ import os
 
 import ConfigParser
 import logging
-import matplotlib
-matplotlib.use('Agg')
-
-import matplotlib.pyplot as plt 
 
 from storypy import Story
 from dtwsom import DtwSom
+from dgw.dtw.scaling import uniform_scaling_to_length, uniform_shrinking_to_length
 import numpy as np
 from multiprocessing import Pool
-
-plt.ioff()
 
 parser = ConfigParser.ConfigParser()
 parser.read("dtwexp.config")
@@ -31,65 +26,89 @@ for story in stories:
         if occurrences.max() == 1:
             characters.append(occurrences.values)
             names.append(actor)
+chars = []
+for char in characters:
+    if char.shape[0] < 65:
+        chars.append(uniform_scaling_to_length(char, 65))
+    elif char.shape[0] > 65:
+        chars.append(uniform_shrinking_to_length(char, 65))
+    else:
+        chars.append(char)
+chars = [np.array(char) for char in chars]
 
 def experiment(args):
-    (x, y, sigma, slope, learning_rate, constraint, window, random_seed, step_pattern, iterations, data, training_procedure, initialization_procedure) = args
-    som = DtwSom(x, y, sigma=sigma, curve=slope, learning_rate=learning_rate, 
-                 random_seed=random_seed, window=window, 
-                 step_pattern=step_pattern)
+    (x, y, sigma, sigma_end, eta, eta_end, decay_fn, 
+     random_seed, n_iter, constraint, metric, window, 
+     step_pattern, normalized, 
+     data, training_procedure, initialization_procedure) = args
+    
+    som = DtwSom(x, y, sigma=sigma, sigma_end=sigma_end, eta=eta, eta_end=eta_end,  
+                 decay_fn=decay_fn, random_seed=random_seed, n_iter=n_iter, intermediate_plots=False, 
+                 compute_errors=0, constraint=constraint, metric=metric, window=window,
+                 step_pattern=step_pattern, normalized=normalized)
+
     if initialization_procedure == 'obs':
         som.random_weights_init(data)
     if training_procedure == 'random':
         try:
-            som.train_random(data, iterations)
+            som.train_random(data)
         except ValueError, err:
             print err
             return
     elif training_procedure == 'batch':
         try:
-            som.train_batch(data, iterations)
+            som.train_batch(data)
         except ValueError, err:
             print err
             return
     else:
         raise ValueError("Training procedure '%s' is not supported." % training_procedure)
-    experiment_name = '%sx%s-sigma.%.2f-slope.%.2f-lr.%.2f-constraint.%s-window.%s-tp.%s-ip.%s' % (
-        x, y, sigma, slope, learning_rate, constraint, window, training_procedure, initialization_procedure)
-    experiment_name = os.path.join(parser.get("data", "outputdir"), experiment_name)
-    som.plot(kind='hinton', data=data, fp=experiment_name + '-hinton.pdf')
-    som.plot(kind='grid', what='prototypes', normalize_scale=False, fp=experiment_name + '-proto-grid.pdf')
-    som.plot(kind='dmap', fp=experiment_name + '-umatrix.pdf')
-    som.plot(kind='grid', what='obs', data=characters, normalize_scale=False, fp=experiment_name + '-obs-grid.pdf')
+    errors = som.quantization_error(data), som.topology_error(data)
+    print errors
+    return errors, args
 
 def parse_range(field):
     if ':' in field:
-        start, end = map(float, field.split(':'))
-        if start < 1 and end <= 1:
-            return np.arange(start, end+0.1, 0.1)
-        return range(int(start), int(end)+1)
+        if len(field.split(':')) == 3:
+            start, end, step = map(float, field.split(':'))
+            if start < 1 and end <= 1:
+                return np.arange(start, end+0.1, step)
+            return range(int(start), int(end)+1, int(step))
+        else:
+            start, end = map(float, field.split(':'))
+            if start < 1 and end <= 1:
+                return np.arange(start, end+0.1, 0.1)
+            return range(int(start), int(end)+1)
     return [int(field)]
 
 params = []
 for size in parse_range(parser.get("som", "size")):
     size = int(size)
     sigma = parser.get("som", "sigma")
-    sigma = size / 3. if sigma == 'relative' else float(sigma)
-    for lr in parse_range(parser.get("som", 'learning-rate')):
-        for slope in parse_range(parser.get("som", "slope")):
-            for window in parse_range(parser.get("dtw", "window")):
-                params.append([size, size, sigma, slope, lr, 
-                              parser.get("dtw", "constraint"),
-                              window,
-                              int(parser.get("som", "seed")),
-                              int(parser.get("dtw", "step-pattern")),
-                              int(parser.get("som", "iterations")),
-                              characters,
-                              parser.get("som", "training-procedure"),
-                              parser.get("som", "init-weights")])
+    sigma = None if sigma == 'relative' else float(sigma)
+    for sigma_end in parse_range(parser.get("som", "sigma-end")):
+        for eta in parse_range(parser.get("som", 'eta')):
+            for eta_end in parse_range(parser.get("som", "eta-end")):
+                for window in parse_range(parser.get("dtw", "window")):
+                    params.append([size, size, 
+                                  sigma, sigma_end,
+                                  eta, eta_end, 
+                                  parser.get("som", "decay-function"),
+                                  int(parser.get("som", "seed")),
+                                  int(parser.get("som", "iterations")),
+                                  parser.get("dtw", "constraint"),
+                                  parser.get("dtw", "metric"),
+                                  window,
+                                  int(parser.get("dtw", "step-pattern")),
+                                  parser.get("dtw", "normalize"),
+                                  chars,
+                                  parser.get("som", "training-procedure"),
+                                  parser.get("som", "init-weights")])
 
 n_jobs = int(parser.get('general', 'n-jobs'))
 pool = Pool(n_jobs)
-pool.map(experiment, params, chunksize=len(params) / n_jobs)
+results = pool.map(experiment, params, chunksize=len(params) / n_jobs)
 pool.close()
 pool.join()
-# experiment(params[0])
+for result in results:
+    print result

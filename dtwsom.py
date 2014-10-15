@@ -1,34 +1,41 @@
+from __future__ import division
+
+import cPickle
 import logging
-import random
 import math
+import random
 
 from collections import defaultdict
 from functools import partial
 from warnings import warn
 
-import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import numpy as np
+import pandas as pd
+import seaborn as sb
 
 from scipy.interpolate import interp1d
-from scipy.cluster.hierarchy import fcluster, linkage
-from scipy.spatial.distance import squareform
+from sklearn.cluster import AgglomerativeClustering
+from sklearn.feature_extraction.image import grid_to_graph
 
-from dtw import dtw_distance
-from somplot import plot_distance_map, hinton
+from dtw import dtw_distance, average_sequence
+from dgw.dtw.scaling import uniform_scaling_to_length, uniform_shrinking_to_length
+from somplot import plot_distance_map, hinton, grid_plot, InteractivePlot
 
 
-# logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.INFO)
+logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.WARN)
 
-def median_example(examples, dtw_fn):
-    if len(examples) == 1:
+
+def median_example(X, dist_fn):
+    if len(X) == 1:
         return 0
-    dm = np.zeros((len(examples), len(examples)))
-    for i in range(len(examples)):
+    dm = np.zeros((len(X), len(X)))
+    for i in range(len(X)):
         for j in range(i):
-            dm[j, i] = dm[i, j] = dtw_fn(examples[i], examples[j])
+            dm[j, i] = dm[i, j] = dist_fn(X[i], X[j])
     return np.argmin(dm.sum(1) / dm.shape[0])
+
 
 def normalize(signal, minimum=None, maximum=None):
     """Normalize a signal to the range 0, 1"""
@@ -44,20 +51,31 @@ def normalize(signal, minimum=None, maximum=None):
     signal = np.clip(signal, 0.0, 1.0)
     return signal
 
+
 def resample(ts, values, num_samples):
     """Convert a list of times and a list of values to evenly
     spaced samples with linear interpolation."""
     ts = normalize(ts)
-    return normalize(np.interp(np.linspace(0.0, 1.0, num_samples), ts, values))
+    return np.interp(np.linspace(0.0, 1.0, num_samples), ts, values)
+
+def no_decay(start):
+    while True:
+        yield start
+
+def linear_decay(start, end, iterations):
+    return iter(np.linspace(start, end, iterations))
+
+def exponential_decay(start, end, iterations, k=2):
+    return iter(start * np.power(k, (np.arange(iterations) / float(iterations)) * np.log(end / start) * 1 / np.log(k)))
 
 
-# the Som class is almost a plain copy of MiniSom 
 class Som(object):
-    def __init__(self, x, y, input_len=0, sigma=1.0, curve=1, learning_rate=0.5,
-                 random_seed=None, intermediate_plots=False):
+    def __init__(self, x, y, input_len=0, sigma=None, sigma_end=None, eta=0.5, eta_end=0.01, 
+                 decay_fn="exponential", random_seed=None, n_iter=1000, intermediate_plots=False, 
+                 compute_errors=250):
 
         """Initializes a Self Organizing Maps.
-        x,y - dimensions of the SOM
+        x, y - dimensions of the SOM
         input_len - number of the elements of the vectors in input
         sigma - spread of the neighborhood function (Gaussian), needs to be adequate to the dimensions of the map.
         (at the iteration t we have sigma(t) = sigma / (1 + t/T) where T is #num_iteration/2)
@@ -65,18 +83,31 @@ class Som(object):
         (at the iteration t we have learning_rate(t) = learning_rate / (1 + t/T) where T is #num_iteration/2)
         random_seed, random seed to use."""
 
-        if sigma >= x/2.0 or sigma >= y/2.0:
+        if sigma >= x / 2.0 or sigma >= y / 2.0:
             warn('Warning: sigma is too high for the dimension of the map.')
+        self.random_seed = random_seed
         self.random_generator = np.random.RandomState(random_seed)
-        self.learning_rate = learning_rate
-        self.sigma = sigma
         self.activation_map = np.zeros((x, y))
-        self.curve = curve
         self.x, self.y = x, y
+        self.n_iter = n_iter
+        self.sigma = sigma if sigma is not None else np.ceil(1 + np.floor(min(self.x, self.y)-1)/2.)-1
+
+        if decay_fn == 'exponential':
+            self.sigma_decay = exponential_decay(self.sigma, sigma_end, n_iter)
+            self.eta_decay = exponential_decay(eta, eta_end, n_iter)
+        elif decay_fn == 'linear':
+            self.sigma_decay = linear_decay(sigma, sigma_end, n_iter)
+            self.eta_decay = linear_decay(eta, eta_end, n_iter)
+        elif decay_fn == 'constant':
+            self.sigma_decay = no_decay(sigma)
+            self.eta_decay = no_decay(eta)
+
+        self.xx, self.yy = np.meshgrid(np.arange(x), np.arange(y))
         self.neigx = np.arange(x)
-        self.neigy = np.arange(y) # used to evaluate the neighborhood function
-        self.neighborhood = self.gaussian
+        self.neigy = np.arange(y)
+        self.compute_errors = compute_errors
         self.intermediate_plots = intermediate_plots
+
         self._init_weights(x, y, input_len)
 
     def _activate(self,x):
@@ -93,12 +124,17 @@ class Som(object):
         self._activate(x)
         return self.activation_map
 
-    def gaussian(self, c, sigma):
-        "Returns a Gaussian centered in c."
-        d = 2 * sigma * sigma # * np.pi
-        ax = np.exp(-np.power(self.neigx-c[0], 2) / d)
-        ay = np.exp(-np.power(self.neigy-c[1], 2) / d)
-        return np.outer(ax, ay) # the external product gives a matrix
+    # def gaussian(self, c, sigma, bandwidth=1/np.pi):
+    #     "Returns a Gaussian centered in c."
+    #     d = 2.0 * sigma * sigma
+    #     return np.exp(-bandwidth * (((self.xx - c[0])**2 + (self.yy - c[1])**2) / d))
+
+    def gaussian(self,c,sigma):
+        """ Returns a Gaussian centered in c """
+        d = 2.0*sigma*sigma*np.pi
+        ax = np.exp(-np.power(self.neigx-c[0],2)/d)
+        ay = np.exp(-np.power(self.neigy-c[1],2)/d)
+        return np.outer(ax,ay) # the external product gives a matrix
 
     def winner(self, x):
         "Computes the coordinates of the winning neuron for the sample x."
@@ -110,17 +146,13 @@ class Som(object):
         x - current pattern to learn;
         win - position of the winning neuron for x (array or tuple);
         t - iteration index."""
-        # eta(t) = eta(0) / (1 + t/T)
-        # keeps the learning rate nearly constant for the first T iterations and then adjusts it
-        eta = self.learning_rate / (1 + t / self.T)
-        sig = self.sigma / (1 + t / self.T) # sigma and learning rate decrease with the same rule
+        eta = self.eta_decay.next()
+        sig = self.sigma_decay.next()
         logging.info('Eta = %.4f / Sigma = %.4f' % (eta, sig))
-        g = self.neighborhood(win, sig) * eta # improves the performances
+        g = self.gaussian(win, sig) * eta # improves the performances
         it = np.nditer(g, flags=['multi_index'])
         while not it.finished:
-            # eta * neighborhood_function * (x-w)
             self.weights[it.multi_index] += g[it.multi_index] * (x - self.weights[it.multi_index])
-            # normalization
             self.weights[it.multi_index] = self.weights[it.multi_index] / np.linalg.norm(self.weights[it.multi_index])
             it.iternext()
 
@@ -140,36 +172,38 @@ class Som(object):
         "Initializes the weights of the SOM picking random samples from data."
         it = np.nditer(self.activation_map, flags=['multi_index'])
         while not it.finished:
-            self.weights[it.multi_index] = data[int(self.random_generator.rand() * len(data)-1)]
+            self.weights[it.multi_index] = data[self.random_generator.randint(len(data))].copy()
             self.weights[it.multi_index] = self.weights[it.multi_index] / np.linalg.norm(self.weights[it.multi_index])
             it.iternext()
 
-    def train_random(self, data, num_iteration, debug=False):
+    def train_random(self, data):
         "Trains the SOM picking samples at random from data."
-        self._init_T(num_iteration)
-        for iteration in range(num_iteration):
-            if debug:
-                self.plot(iteration)
-            logging.info('Iteration %d / %d' % (iteration + 1, num_iteration))
-            rand_i = int(round(self.random_generator.rand() * len(data)-1))
-            input_sequence = data[rand_i] #normalize(data[rand_i])
-            self.update(input_sequence, self.winner(input_sequence), iteration)
+        if self.compute_errors:
+            quantization_fig = InteractivePlot(0, "iterations", "quantization error")
+            topology_fig = InteractivePlot(1, "iterations", "topology error")            
+        for iteration in range(self.n_iter):
+            logging.info('Iteration %d / %d' % (iteration + 1, self.n_iter))
+            rand_i = self.random_generator.randint(len(data))
+            # logging.debug("Input selection: %d" % rand_i)
+            self.update(data[rand_i], self.winner(data[rand_i]), iteration)
+            if self.compute_errors and iteration % self.compute_errors == 0:
+                quantization_fig.update(iteration, self.quantization_error(data))
+                topology_fig.update(iteration, self.topology_error(data))
 
-    def train_batch(self, data, num_iteration, shuffle=False):
+    def train_batch(self, data, num_iteration, shuffle=False, compute_error=False):
         "Trains using all the vectors in data sequentially."
         if shuffle:
-            random.shuffle(data)
-        self._init_T(len(data))# * num_iteration)
+            self.random_generator.shuffle(data)
+        if compute_error:
+            fig = InteractivePlot("iterations", "quantization error")
         iteration = 0
         while iteration < num_iteration:
             logging.info('Iteration %d / %d' % (iteration + 1, num_iteration))
             idx = iteration % (len(data) - 1)
             self.update(data[idx], self.winner(data[idx]), iteration)
             iteration += 1
-
-    def _init_T(self, num_iteration):
-        "Initializes the parameter T needed to adjust the learning rate."
-        self.T = num_iteration / 2.0 # keeps the learning rate nearly constant for the first half of the iterations
+            if compute_error and iteration % 5 == 0:
+                fig.update(iteration, self.quantization_error(data))
 
     def distance_map(self):
         """Returns the average distance map of the weights.
@@ -187,8 +221,9 @@ class Som(object):
 
     def distance_matrix(self, dist_fn=lambda a, b: np.linalg.norm(a - b)):
         neurons = [self.weights[i][j] for i in range(self.x) for j in range(self.y)]
-        dm = np.zeros((len(neurons), len(neurons)))
-        for i in range(len(neurons)):
+        n = self.x * self.y
+        dm = np.zeros((n, n))
+        for i in range(n):
             for j in range(i):
                 dm[j, i] = dm[i, j] = dist_fn(neurons[i], neurons[j])
         return dm
@@ -201,6 +236,17 @@ class Som(object):
             a[self.winner(x)] += 1
         return a
 
+    def topology_error(self, data):
+        error = 0
+        for x in data:
+            activation_map = self.activate(x)
+            indices = activation_map.ravel().argsort()[:2]
+            indices = [np.unravel_index(i, activation_map.shape) for i in indices]
+            u, v = indices[0], indices[1]
+            if math.sqrt(sum((a - b)**2 for a, b in zip(u, v))) > 1:
+                error += 1.0
+        return error / len(data)
+
     def quantization_error(self, data):
         """Returns the quantization error computed as the average distance between
         each input sample and its best matching unit."""
@@ -210,60 +256,47 @@ class Som(object):
             error += np.linalg.norm(x - self.weights[i][j])
         return error / len(data)
 
-    def win_map(self, data, dist=False):
+    def win_map(self, data, dist=False, labels=None):
         """Returns a dictionary wm where wm[(i,j)] is a list with all the patterns
         that have been mapped in the position i,j."""
         winmap = defaultdict(list)
-        for x in data:
+        for k, x in enumerate(data):
             assert x.max() > 0
             i, j = self.winner(x)
             if dist:
                 winmap[i, j].append((x, self.activation_map[i, j]))
+            elif labels is not None:
+                winmap[i, j].append(labels[k])
             else:
                 winmap[i, j].append(x)
         return dict(winmap)
 
-    def _cluster(self, method='average', t=0.6):
-        dm = self.distance_matrix()
-        Z = linkage(squareform(dm), method=method)
-        if t is not None:
-            return fcluster(Z, t=max(t * Z[:,2]), criterion='distance')
-        return Z
+    def _cluster(self, linkage='complete', k=6):
+        C = grid_to_graph(self.x, self.y)
+        X = np.array(self.weights).reshape((self.x * self.y, self.weights[0][0].shape[0]))
+        clusterer = AgglomerativeClustering(n_clusters=k, connectivity=C, affinity=self.dtw_fn, linkage=linkage)
+        return clusterer.fit_predict(X)
 
-    def _plot_grid(self, what='prototypes', data=None, normalize_scale=True):
-        fig = plt.figure(figsize=(8, 8))
-        outer_grid = gridspec.GridSpec(self.x, self.y, wspace=0.0, hspace=0.0)
-        cnt = 0
-        width = max(self.weights[i][j].shape[0] for i in range(self.x)
-                                                for j in range(self.y))
+    def _plot_grid(self, what='prototypes', data=None, normalize_scale=True, colors=None):
         if what == 'prototypes':
             points = self.weights
         elif what == 'obs':
-            points = [[None for i in range(self.x)] for j in range(self.y)]
             if data is None:
                 raise ValueError("Must supply raw data points.")
+            points = [[None for i in range(self.x)] for j in range(self.y)]
             wm = self.win_map(data)
             for (i, j), value in wm.iteritems():
                 points[i][j] = value[median_example(value, self.dtw_fn)]
-        for i in range(self.x):
-            for j in range(self.y):
-                ax = plt.Subplot(fig, outer_grid[cnt])
-                if points[i][j] is None:
-                    cnt += 1
-                    continue
-                ax.plot(points[i][j])
-                ax.set_xticks([])
-                ax.set_yticks([])
-                if normalize_scale:
-                    ax.set_ylim(0, 1)
-                    ax.set_xlim(0, width)
-                fig.add_subplot(ax)
-                cnt += 1
-        return fig
+        return grid_plot(points, self.x, self.y, normalize_scale, colors=colors)
 
-    def plot(self, t=0, what='prototypes', data=None, kind='grid', normalize_scale=True, fp=""):
+    def plot(self, t=0, what='prototypes', data=None, kind='grid', clusters=0, normalize_scale=True, fp="", close=False):
         if kind == 'grid':
-            fig = self._plot_grid(what=what, data=data, normalize_scale=normalize_scale)
+            if clusters:
+                colors = sb.color_palette("deep", clusters)
+                colors = [colors[c] for c in self._cluster(k=clusters)]
+            else:
+                colors = None
+            fig = self._plot_grid(what=what, data=data, normalize_scale=normalize_scale, colors=colors)
         elif kind == 'dmap':
             fig = plot_distance_map(self.distance_map())
         elif kind == 'hinton':
@@ -275,24 +308,39 @@ class Som(object):
             raise ValueError("Plot type '%s' is not supported." % kind)
         if fp:
             plt.savefig(fp)
-        plt.close(fig)
+        if close:
+            plt.close(fig)
+
+    def save(self, filepath):
+        "Serialize a model to disk."
+        with open(filepath, "wb") as out:
+            cPickle.dump(self, out, protocol=cPickle.HIGHEST_PROTOCOL)
+
+    @classmethod
+    def load(cls, filepath):
+        "Load a saved model."
+        with open(filepath, "rb") as infile:
+            model = cPickle.load(infile)
+        return model
 
 
 class DtwSom(Som):
-    def __init__(self, x, y, sigma=1.0, curve=1, learning_rate=0.5,
-                 random_seed=None, intermediate_plots=False,
-                 constraint='slanted_band', window=5, step_pattern=2,
-                 normalized=True):
+    def __init__(self, x, y, sigma=None, sigma_end=0.5, eta=0.5, eta_end=0.01,  
+                 decay_fn="exponential", random_seed=None, n_iter=1000, intermediate_plots=False, 
+                 compute_errors=500, constraint='slanted_band', metric='seuclidean', window=5,
+                 step_pattern=2, normalized=True):
 
-        super(DtwSom, self).__init__(x, y, sigma=sigma, curve=curve, learning_rate=learning_rate,
-                                     random_seed=random_seed, intermediate_plots=intermediate_plots)
+        super(DtwSom, self).__init__(x, y, sigma=sigma, sigma_end=sigma_end, eta=eta, eta_end=eta_end,
+                                     decay_fn=decay_fn, random_seed=random_seed, n_iter=n_iter,
+                                     intermediate_plots=intermediate_plots, compute_errors=compute_errors)
 
         self.dtw_fn = partial(dtw_distance, constraint=constraint,
                                             window=window,
+                                            metric=metric,
                                             step_pattern=step_pattern,
                                             normalized=normalized)
 
-    def _activate(self,x):
+    def _activate(self, x):
         """Updates matrix activation_map, in this matrix the element i,j
         is the response of the neuron i,j to x """
         it = np.nditer(self.activation_map, flags=['multi_index'])
@@ -300,47 +348,47 @@ class DtwSom(Som):
             i, j = it.multi_index
             if self.weights[i][j].size == 0:
                 # make a new neuron with random signals of a random size
-                neuron = np.array(self.random_generator.randint(
-                    2, size=self.random_generator.randint(10, 100)), dtype=np.float)
-                self.weights[i][j] = normalize(neuron)
+                neuron = np.array(self.random_generator.randint(2, size=x.shape[0]), dtype=np.float)
+                self.weights[i][j] = neuron #/ np.linalg.norm(neuron)
             # compute the distance between this neuron and the input 
             self.activation_map[it.multi_index] = self.dtw_fn(self.weights[i][j], x)
             it.iternext()
 
-    def update(self, ts,win,t):
-        eta = self.learning_rate * np.exp(-self.curve * ((1.0 + t) / self.T))
-        sig = self.sigma * np.exp(-self.curve * ((1.0 + t) / self.T))
+    def update(self, ts, win, t):
+        eta = self.eta_decay.next()
+        sig = self.sigma_decay.next()
+        g = self.gaussian(win, sig) * eta
+        
         logging.info('Eta = %.4f / Sigma = %.4f' % (eta, sig))
-        g = self.neighborhood(win, sig) * eta
+        
         for i in range(self.x):
             for j in range(self.y):
                 h = g[i, j]
-                logging.debug("Neighborhood function: %.4f / factor %.4f" % (g[i, j], h))
                 if h > 0:
                     self.weights[i][j] = self.average_sequence(self.weights[i][j], ts, (1-h), h)
-        if self.intermediate_plots and t % 50 == 0:
-            self.plot(t)
 
     def average_sequence(self, M, X, hm, hx):
         """Compute an average sequence between two input sequences based on the warping path
         between them and using linear interpolation for compression."""
         # In the model adaptation the length of the new model vector sequence is determined first
-        avg_length = int(0.5 + (hm * M.shape[0] + hx * X.shape[0]))
-        if not ((M.shape[0] <= avg_length <= X.shape[0]) or (X.shape[0] <= avg_length <= M.shape[0])):
-            raise ValueError("Something went wrong with averaging the time series. (hx:%s, hm:%s, l=%d)" % (hx, hm, avg_length))
+        # avg_length = int(0.5 + round(hm * M.shape[0] + hx * X.shape[0]))
+        # if not ((M.shape[0] <= avg_length <= X.shape[0]) or (X.shape[0] <= avg_length <= M.shape[0])):
+        #     raise ValueError("Something went wrong with averaging the time series. (hx:%s, hm:%s, l=%d)" % (hx, hm, avg_length))
         # then the matching vectors of the input Xt and old model vector sequence Mk
         # are averaged along the warping function F
         _, _, (x_arr, y_arr) = self.dtw_fn(X, M, dist_only=False)
-        averaged_path, positions = np.zeros(len(x_arr)), np.zeros(len(x_arr))
+        # averaged_path, positions = np.zeros(len(x_arr)), np.zeros(len(x_arr))
         for p, (i, j) in enumerate(zip(x_arr, y_arr)):
-            averaged_path[p] = M[j] + hx * (X[i] - M[j])
-            positions[p] = hm * j + hx * i
-        # next we interpolate the distances into the new vector
-        M_ = resample(positions, averaged_path, avg_length)
-        if not (np.isnan(np.dot(M_, M_)) == False):
-            raise ValueError("Something went wrong with interpolation, nan-values...")#(x_arr, y_arr, M_, positions, averaged_path, hm, hx)
-        logging.debug("Min / Max value after interpolation: %.4f / %.4f" % (M_.min(), M_.max()))
-        return M_
+            M[j] += hx * (X[i] - M[j])
+        return M
+            # averaged_path[p] = M[j] + hx * (X[i] - M[j])
+            # positions[p] = hm * j + hx * i
+        # # next we interpolate the distances into the new vector
+        # M_ = resample(positions, averaged_path, avg_length)
+        # if np.isnan(np.dot(M_, M_)):
+        #     raise ValueError("Something went wrong with interpolation, nan-values...")
+        # logging.debug("Min / Max value after interpolation: %.4f / %.4f" % (M_.min(), M_.max()))
+        # return M_
 
     def _init_weights(self, x, y, *args):
         self.weights = [[np.zeros(0) for i in range(x)] for j in range(y)]
@@ -350,16 +398,16 @@ class DtwSom(Som):
         it = np.nditer(self.activation_map, flags=['multi_index'])
         while not it.finished:
             i, j = it.multi_index
-            self.weights[i][j] = data[int(self.random_generator.rand() * len(data) - 1)]
+            self.weights[i][j] = data[self.random_generator.randint(len(data))].copy()
             it.iternext()
 
     def quantization_error(self,data):
         """Returns the quantization error computed as the average distance between
         each input sample and its best matching unit."""
         error = 0
-        for x in data:
+        for x in data:        
             i, j = self.winner(x)
-            error += self.dtw_fn(self.weights[i][j], x)
+            error += self.dtw_fn(self.weights[i][j], x, normalized=False)
         return error / len(data)
 
     def distance_map(self):

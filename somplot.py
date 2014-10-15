@@ -1,6 +1,32 @@
-import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
+import matplotlib.gridspec as gridspec
+import numpy as np
+import seaborn as sbn
+
+
+class InteractivePlot(object):
+
+    def __init__(self, id, xlabel, ylabel):
+        self.id = id
+        plt.figure(id)
+        plt.ion()
+        self.xlabel = xlabel
+        self.ylabel = ylabel
+        self.x = []
+        self.y = []
+
+    def update(self, xval, yval):
+        x = self.x
+        y = self.y
+        x.append(xval)
+        y.append(yval)
+        plt.figure(self.id)
+        plt.clf()
+        plt.plot(x, y, 'k')
+        plt.xlabel(self.xlabel)
+        plt.ylabel(self.ylabel)
+        plt.draw()
 
 def hinton(matrix, max_weight=None, ax=None):
     """Draw Hinton diagram for visualizing a weight matrix."""
@@ -29,4 +55,25 @@ def plot_distance_map(matrix, interpolation='bilinear', ax=None):
     fig = plt.figure()
     plt.imshow(matrix, interpolation=interpolation, cmap=cm.RdYlGn,
               vmax=abs(matrix).max(), vmin=-abs(matrix).max())
+    return fig
+
+def grid_plot(matrix, width, height, normalize_scale=False, colors=None):
+    fig = plt.figure(figsize=(8, 8))
+    if colors is None:
+        colors = ['blue'] * (width * height)
+    outer_grid = gridspec.GridSpec(width, height, wspace=0.1, hspace=0.1)
+    cnt = 0
+    max_width = max(cell.shape[0] for row in matrix for cell in row if cell is not None)
+    for i in range(width):
+        for j in range(height):
+            ax = plt.Subplot(fig, outer_grid[cnt])
+            if matrix[i][j] is not None:
+                sbn.tsplot(matrix[i][j], color=colors[cnt], ax=ax)
+                ax.set_xticks([])
+                ax.set_yticks([])
+                if normalize_scale:
+                    ax.set_ylim(-0.1, 1.1) 
+                    ax.set_xlim(-1, max_width+1)
+                fig.add_subplot(ax)
+            cnt += 1
     return fig
