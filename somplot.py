@@ -71,8 +71,8 @@ def grid_plot(matrix, width, height, normalize_scale=False, colors=None):
                 sbn.tsplot(matrix[i][j], color=colors[cnt], ax=ax)
                 ax.set_xticks([])
                 ax.set_yticks([])
+                ax.set_ylim(-0.1, 1.1) 
                 if normalize_scale:
-                    ax.set_ylim(-0.1, 1.1) 
                     ax.set_xlim(-1, max_width+1)
                 fig.add_subplot(ax)
             cnt += 1

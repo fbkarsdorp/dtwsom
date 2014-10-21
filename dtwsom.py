@@ -24,7 +24,7 @@ from dgw.dtw.scaling import uniform_scaling_to_length, uniform_shrinking_to_leng
 from somplot import plot_distance_map, hinton, grid_plot, InteractivePlot
 
 
-logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.WARN)
+logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=logging.DEBUG)
 
 
 def median_example(X, dist_fn):
@@ -36,28 +36,6 @@ def median_example(X, dist_fn):
             dm[j, i] = dm[i, j] = dist_fn(X[i], X[j])
     return np.argmin(dm.sum(1) / dm.shape[0])
 
-
-def normalize(signal, minimum=None, maximum=None):
-    """Normalize a signal to the range 0, 1"""
-    signal = np.array(signal).astype('float')
-    if minimum is None:
-        signal -= np.min(signal)
-    else:
-        signal -= minimum
-    if maximum is None:
-        signal /= np.max(signal)
-    else:
-        signal /= maximum - minimum
-    signal = np.clip(signal, 0.0, 1.0)
-    return signal
-
-
-def resample(ts, values, num_samples):
-    """Convert a list of times and a list of values to evenly
-    spaced samples with linear interpolation."""
-    ts = normalize(ts)
-    return np.interp(np.linspace(0.0, 1.0, num_samples), ts, values)
-
 def no_decay(start):
     while True:
         yield start
@@ -68,6 +46,8 @@ def linear_decay(start, end, iterations):
 def exponential_decay(start, end, iterations, k=2):
     return iter(start * np.power(k, (np.arange(iterations) / float(iterations)) * np.log(end / start) * 1 / np.log(k)))
 
+# def exponential_decay(start, iterations, slope=1):
+#     return iter(start * np.exp(-slope * ((np.arange(iterations) * np.log(start)) / float(iterations))))
 
 class Som(object):
     def __init__(self, x, y, input_len=0, sigma=None, sigma_end=None, eta=0.5, eta_end=0.01, 
@@ -131,9 +111,9 @@ class Som(object):
 
     def gaussian(self,c,sigma):
         """ Returns a Gaussian centered in c """
-        d = 2.0*sigma*sigma*np.pi
-        ax = np.exp(-np.power(self.neigx-c[0],2)/d)
-        ay = np.exp(-np.power(self.neigy-c[1],2)/d)
+        d = 2.0 * sigma * sigma #* np.pi
+        ax = np.exp(-np.power(self.neigx - c[0], 2) / d)
+        ay = np.exp(-np.power(self.neigy - c[1], 2) / d)
         return np.outer(ax,ay) # the external product gives a matrix
 
     def winner(self, x):
@@ -190,20 +170,21 @@ class Som(object):
                 quantization_fig.update(iteration, self.quantization_error(data))
                 topology_fig.update(iteration, self.topology_error(data))
 
-    def train_batch(self, data, num_iteration, shuffle=False, compute_error=False):
+    def train_batch(self, data, shuffle=False):
         "Trains using all the vectors in data sequentially."
-        if shuffle:
-            self.random_generator.shuffle(data)
-        if compute_error:
-            fig = InteractivePlot("iterations", "quantization error")
+        self.random_generator.shuffle(data)
+        if self.compute_errors:
+            quantization_fig = InteractivePlot(0, "iterations", "quantization error")
+            topology_fig = InteractivePlot(1, "iterations", "topology error") 
         iteration = 0
-        while iteration < num_iteration:
-            logging.info('Iteration %d / %d' % (iteration + 1, num_iteration))
+        while iteration < self.n_iter:
+            logging.info('Iteration %d / %d' % (iteration + 1, self.n_iter))
             idx = iteration % (len(data) - 1)
             self.update(data[idx], self.winner(data[idx]), iteration)
+            if self.compute_errors and iteration % self.compute_errors == 0:
+                quantization_fig.update(iteration, self.quantization_error(data))
+                topology_fig.update(iteration, self.topology_error(data))
             iteration += 1
-            if compute_error and iteration % 5 == 0:
-                fig.update(iteration, self.quantization_error(data))
 
     def distance_map(self):
         """Returns the average distance map of the weights.
@@ -328,7 +309,7 @@ class DtwSom(Som):
     def __init__(self, x, y, sigma=None, sigma_end=0.5, eta=0.5, eta_end=0.01,  
                  decay_fn="exponential", random_seed=None, n_iter=1000, intermediate_plots=False, 
                  compute_errors=500, constraint='slanted_band', metric='seuclidean', window=5,
-                 step_pattern=2, normalized=True):
+                 step_pattern=2, normalized=True, update_fn="som"):
 
         super(DtwSom, self).__init__(x, y, sigma=sigma, sigma_end=sigma_end, eta=eta, eta_end=eta_end,
                                      decay_fn=decay_fn, random_seed=random_seed, n_iter=n_iter,
@@ -339,6 +320,7 @@ class DtwSom(Som):
                                             metric=metric,
                                             step_pattern=step_pattern,
                                             normalized=normalized)
+        self._update_weights = self._som_update if update_fn == 'som' else self._average_sequence_update
 
     def _activate(self, x):
         """Updates matrix activation_map, in this matrix the element i,j
@@ -349,7 +331,7 @@ class DtwSom(Som):
             if self.weights[i][j].size == 0:
                 # make a new neuron with random signals of a random size
                 neuron = np.array(self.random_generator.randint(2, size=x.shape[0]), dtype=np.float)
-                self.weights[i][j] = neuron #/ np.linalg.norm(neuron)
+                self.weights[i][j] = neuron / np.linalg.norm(neuron)
             # compute the distance between this neuron and the input 
             self.activation_map[it.multi_index] = self.dtw_fn(self.weights[i][j], x)
             it.iternext()
@@ -357,38 +339,43 @@ class DtwSom(Som):
     def update(self, ts, win, t):
         eta = self.eta_decay.next()
         sig = self.sigma_decay.next()
-        g = self.gaussian(win, sig) * eta
-        
         logging.info('Eta = %.4f / Sigma = %.4f' % (eta, sig))
-        
+
+        g = self.gaussian(win, sig) * eta        
         for i in range(self.x):
             for j in range(self.y):
                 h = g[i, j]
                 if h > 0:
-                    self.weights[i][j] = self.average_sequence(self.weights[i][j], ts, (1-h), h)
+                    self.weights[i][j] = self._update_weights(self.weights[i][j], ts, (1-h), h)
 
-    def average_sequence(self, M, X, hm, hx):
+    def _som_update(self, M, X, hm, hx):
+        _, _, (x_arr, y_arr) = self.dtw_fn(X, M, dist_only=False)
+        M_ = M.copy() # we must update t+1, so first make a copy...
+        for p, (i, j) in enumerate(zip(x_arr, y_arr)):
+            M_[j] += hx * (X[i] - M[j])
+        return M_ / np.linalg.norm(M_)
+
+    def _average_sequence_update(self, M, X, hm, hx):
         """Compute an average sequence between two input sequences based on the warping path
         between them and using linear interpolation for compression."""
         # In the model adaptation the length of the new model vector sequence is determined first
-        # avg_length = int(0.5 + round(hm * M.shape[0] + hx * X.shape[0]))
-        # if not ((M.shape[0] <= avg_length <= X.shape[0]) or (X.shape[0] <= avg_length <= M.shape[0])):
-        #     raise ValueError("Something went wrong with averaging the time series. (hx:%s, hm:%s, l=%d)" % (hx, hm, avg_length))
+        avg_length = int(0.5 + round(hm * M.shape[0] + hx * X.shape[0]))
+        if not ((M.shape[0] <= avg_length <= X.shape[0]) or (X.shape[0] <= avg_length <= M.shape[0])):
+            raise ValueError("Something went wrong with averaging the time series. (hx:%s, hm:%s, l=%d)" % (hx, hm, avg_length))
         # then the matching vectors of the input Xt and old model vector sequence Mk
         # are averaged along the warping function F
         _, _, (x_arr, y_arr) = self.dtw_fn(X, M, dist_only=False)
-        # averaged_path, positions = np.zeros(len(x_arr)), np.zeros(len(x_arr))
+        averaged_path, positions = np.zeros(len(x_arr)), np.zeros(len(x_arr))
         for p, (i, j) in enumerate(zip(x_arr, y_arr)):
-            M[j] += hx * (X[i] - M[j])
-        return M
-            # averaged_path[p] = M[j] + hx * (X[i] - M[j])
-            # positions[p] = hm * j + hx * i
+            averaged_path[p] = M[j] + hx * (X[i] - M[j])
+            positions[p] = hm * j + hx * i
         # # next we interpolate the distances into the new vector
-        # M_ = resample(positions, averaged_path, avg_length)
-        # if np.isnan(np.dot(M_, M_)):
-        #     raise ValueError("Something went wrong with interpolation, nan-values...")
+        interpx = interp1d(positions, averaged_path, kind='linear', assume_sorted=True, fill_value=0.0)
+        M_ = interpx(np.linspace(positions[0], positions[-1], num=avg_length))
+        if np.isnan(np.dot(M_, M_)):
+            raise ValueError("Something went wrong with interpolation, nan-values...")
         # logging.debug("Min / Max value after interpolation: %.4f / %.4f" % (M_.min(), M_.max()))
-        # return M_
+        return M_
 
     def _init_weights(self, x, y, *args):
         self.weights = [[np.zeros(0) for i in range(x)] for j in range(y)]
@@ -402,12 +389,12 @@ class DtwSom(Som):
             it.iternext()
 
     def quantization_error(self,data):
-        """Returns the quantization error computed as the average distance between
+        """Returns the quantization error computed as the average (normalized) distance between
         each input sample and its best matching unit."""
         error = 0
         for x in data:        
             i, j = self.winner(x)
-            error += self.dtw_fn(self.weights[i][j], x, normalized=False)
+            error += self.dtw_fn(self.weights[i][j], x, normalized=True)
         return error / len(data)
 
     def distance_map(self):
