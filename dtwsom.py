@@ -51,7 +51,7 @@ def exponential_decay(start, end, iterations, k=2):
 
 class Som(object):
     def __init__(self, x, y, input_len=0, sigma=None, sigma_end=None, eta=0.5, eta_end=0.01, 
-                 decay_fn="exponential", random_seed=None, n_iter=1000, intermediate_plots=False, 
+                 decay_fn="exponential", random_seed=20, n_iter=1000, intermediate_plots=False, 
                  compute_errors=250):
 
         """Initializes a Self Organizing Maps.
@@ -90,7 +90,7 @@ class Som(object):
 
         self._init_weights(x, y, input_len)
 
-    def _activate(self,x):
+    def _activate(self, x):
         """Updates matrix activation_map, in this matrix the element i,j 
         is the response of the neuron i,j to x."""
         s = np.subtract(x, self.weights) # x - w
@@ -104,17 +104,12 @@ class Som(object):
         self._activate(x)
         return self.activation_map
 
-    # def gaussian(self, c, sigma, bandwidth=1/np.pi):
-    #     "Returns a Gaussian centered in c."
-    #     d = 2.0 * sigma * sigma
-    #     return np.exp(-bandwidth * (((self.xx - c[0])**2 + (self.yy - c[1])**2) / d))
-
     def gaussian(self,c,sigma):
         """ Returns a Gaussian centered in c """
         d = 2.0 * sigma * sigma #* np.pi
         ax = np.exp(-np.power(self.neigx - c[0], 2) / d)
         ay = np.exp(-np.power(self.neigy - c[1], 2) / d)
-        return np.outer(ax,ay) # the external product gives a matrix
+        return np.outer(ax, ay) # the external product gives a matrix
 
     def winner(self, x):
         "Computes the coordinates of the winning neuron for the sample x."
@@ -360,6 +355,7 @@ class DtwSom(Som):
         between them and using linear interpolation for compression."""
         # In the model adaptation the length of the new model vector sequence is determined first
         avg_length = int(0.5 + round(hm * M.shape[0] + hx * X.shape[0]))
+        # control for averages too far away... (Ugly hack...)
         if not ((M.shape[0] <= avg_length <= X.shape[0]) or (X.shape[0] <= avg_length <= M.shape[0])):
             raise ValueError("Something went wrong with averaging the time series. (hx:%s, hm:%s, l=%d)" % (hx, hm, avg_length))
         # then the matching vectors of the input Xt and old model vector sequence Mk
@@ -375,7 +371,7 @@ class DtwSom(Som):
         if np.isnan(np.dot(M_, M_)):
             raise ValueError("Something went wrong with interpolation, nan-values...")
         # logging.debug("Min / Max value after interpolation: %.4f / %.4f" % (M_.min(), M_.max()))
-        return M_
+        return M_ / np.linalg.norm(M_)
 
     def _init_weights(self, x, y, *args):
         self.weights = [[np.zeros(0) for i in range(x)] for j in range(y)]
@@ -388,10 +384,10 @@ class DtwSom(Som):
             self.weights[i][j] = data[self.random_generator.randint(len(data))].copy()
             it.iternext()
 
-    def quantization_error(self,data):
+    def quantization_error(self, data):
         """Returns the quantization error computed as the average (normalized) distance between
         each input sample and its best matching unit."""
-        error = 0
+        error = 0.0
         for x in data:        
             i, j = self.winner(x)
             error += self.dtw_fn(self.weights[i][j], x, normalized=True)

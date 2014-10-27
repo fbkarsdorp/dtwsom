@@ -51,10 +51,9 @@ def hinton(matrix, max_weight=None, ax=None):
     ax.invert_yaxis()
     return fig
 
-def plot_distance_map(matrix, interpolation='bilinear', ax=None):
+def plot_distance_map(matrix):
     fig = plt.figure()
-    plt.imshow(matrix, interpolation=interpolation, cmap=cm.RdYlGn,
-              vmax=abs(matrix).max(), vmin=-abs(matrix).max())
+    sb.heatmap(matrix)
     return fig
 
 def grid_plot(matrix, width, height, normalize_scale=False, colors=None):
