@@ -46,12 +46,9 @@ def linear_decay(start, end, iterations):
 def exponential_decay(start, end, iterations, k=2):
     return iter(start * np.power(k, (np.arange(iterations) / float(iterations)) * np.log(end / start) * 1 / np.log(k)))
 
-# def exponential_decay(start, iterations, slope=1):
-#     return iter(start * np.exp(-slope * ((np.arange(iterations) * np.log(start)) / float(iterations))))
-
 class Som(object):
     def __init__(self, x, y, input_len=0, sigma=None, sigma_end=None, eta=0.5, eta_end=0.01, 
-                 decay_fn="exponential", random_seed=20, n_iter=1000, intermediate_plots=False, 
+                 decay_fn="exponential", random_seed=None, n_iter=1000, intermediate_plots=False, 
                  compute_errors=250):
 
         """Initializes a Self Organizing Maps.

@@ -4,6 +4,7 @@ logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=lo
 from storypy import Story
 from dtwsom import DtwSom
 import numpy as np
+
 from dgw.dtw.scaling import uniform_scaling_to_length, uniform_shrinking_to_length
 
 
@@ -25,9 +26,9 @@ for char in characters:
         chars.append(char)
 chars = [char / np.linalg.norm(np.array(char)) for char in chars]
 for i in range(10):
-    som = DtwSom(6, 6, constraint='none', window=5, sigma=None, 
+    som = DtwSom(6, 6, constraint='slanted_band', window=5, sigma=None, 
                  sigma_end=0.5, eta=0.5, eta_end=0.01, decay_fn='exponential', 
-                 random_seed=1, metric='euclidean', normalized=True, 
+                 random_seed=2, metric='euclidean', normalized=True, 
                  step_pattern=2, n_iter=100, compute_errors=0)
     som.train_random(chars)
     print som.topology_error(chars)
