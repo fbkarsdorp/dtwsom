@@ -36,7 +36,7 @@ def median_example(X, dist_fn):
             dm[j, i] = dm[i, j] = dist_fn(X[i], X[j])
     return np.argmin(dm.sum(1) / dm.shape[0])
 
-def no_decay(start):
+def no_decay(start, *args):
     while True:
         yield start
 
@@ -67,17 +67,11 @@ class Som(object):
         self.activation_map = np.zeros((x, y))
         self.x, self.y = x, y
         self.n_iter = n_iter
-        self.sigma = sigma if sigma is not None else np.ceil(1 + np.floor(min(self.x, self.y)-1)/2.)-1
+        self.decay_fn = decay_fn
 
-        if decay_fn == 'exponential':
-            self.sigma_decay = exponential_decay(self.sigma, sigma_end, n_iter)
-            self.eta_decay = exponential_decay(eta, eta_end, n_iter)
-        elif decay_fn == 'linear':
-            self.sigma_decay = linear_decay(sigma, sigma_end, n_iter)
-            self.eta_decay = linear_decay(eta, eta_end, n_iter)
-        elif decay_fn == 'constant':
-            self.sigma_decay = no_decay(sigma)
-            self.eta_decay = no_decay(eta)
+        sigma = sigma if sigma is not None else np.ceil(1 + np.floor(min(self.x, self.y)-1)/2.)-1
+        self.sigma_decay = self._init_decay_function(sigma, sigma_end, n_iter, decay_fn)
+        self.eta_decay = self._init_decay_function(eta, eta_end, n_iter, decay_fn)
 
         self.xx, self.yy = np.meshgrid(np.arange(x), np.arange(y))
         self.neigx = np.arange(x)
@@ -86,6 +80,15 @@ class Som(object):
         self.intermediate_plots = intermediate_plots
 
         self._init_weights(x, y, input_len)
+
+    def _init_decay_function(self, start, end, n_iter, decay_fn):
+        decay_fn = (constant if decay_fn == 'constant' else
+                    linear_decay if decay_fn == 'linear' else
+                    exponential_decay if decay_fn == 'exponential' else
+                    None)
+        if decay_fn is None:
+            raise ValueError("Decay function is not supported.")
+        return decay_fn(start, end, n_iter)
 
     def _activate(self, x):
         """Updates matrix activation_map, in this matrix the element i,j 
@@ -101,8 +104,8 @@ class Som(object):
         self._activate(x)
         return self.activation_map
 
-    def gaussian(self,c,sigma):
-        """ Returns a Gaussian centered in c """
+    def gaussian(self, c, sigma):
+        """Returns a Gaussian centered in c"""
         d = 2.0 * sigma * sigma #* np.pi
         ax = np.exp(-np.power(self.neigx - c[0], 2) / d)
         ay = np.exp(-np.power(self.neigy - c[1], 2) / d)
@@ -148,34 +151,41 @@ class Som(object):
             self.weights[it.multi_index] = self.weights[it.multi_index] / np.linalg.norm(self.weights[it.multi_index])
             it.iternext()
 
-    def train_random(self, data):
+    def train_random(self, data, continuing=0):
         "Trains the SOM picking samples at random from data."
-        if self.compute_errors:
-            quantization_fig = InteractivePlot(0, "iterations", "quantization error")
-            topology_fig = InteractivePlot(1, "iterations", "topology error")            
-        for iteration in range(self.n_iter):
+        if self.compute_errors and not continuing:
+            self.quantization_fig = InteractivePlot(0, "iterations", "quantization error")
+            self.topology_fig = InteractivePlot(1, "iterations", "topology error")            
+        for iteration in range(continuing, self.n_iter):
             logging.info('Iteration %d / %d' % (iteration + 1, self.n_iter))
             rand_i = self.random_generator.randint(len(data))
             # logging.debug("Input selection: %d" % rand_i)
             self.update(data[rand_i], self.winner(data[rand_i]), iteration)
             if self.compute_errors and iteration % self.compute_errors == 0:
-                quantization_fig.update(iteration, self.quantization_error(data))
-                topology_fig.update(iteration, self.topology_error(data))
+                self.quantization_fig.update(iteration, self.quantization_error(data))
+                self.topology_fig.update(iteration, self.topology_error(data))
+
+    def continue_training(self, data, sigma, sigma_end, eta, eta_end, n_iter):
+        "Continue a random training session with new decay start and ending points."
+        self.sigma_decay = self._init_decay_function(sigma, sigma_end, n_iter, self.decay_fn)
+        self.eta_decay = self._init_decay_function(eta, eta_end, n_iter, self.decay_fn)
+        self.n_iter = self.n_iter + n_iter
+        self.train_random(data, self.n_iter - n_iter)
 
     def train_batch(self, data, shuffle=False):
         "Trains using all the vectors in data sequentially."
         self.random_generator.shuffle(data)
         if self.compute_errors:
-            quantization_fig = InteractivePlot(0, "iterations", "quantization error")
-            topology_fig = InteractivePlot(1, "iterations", "topology error") 
+            self.quantization_fig = InteractivePlot(0, "iterations", "quantization error")
+            self.topology_fig = InteractivePlot(1, "iterations", "topology error") 
         iteration = 0
         while iteration < self.n_iter:
             logging.info('Iteration %d / %d' % (iteration + 1, self.n_iter))
             idx = iteration % (len(data) - 1)
             self.update(data[idx], self.winner(data[idx]), iteration)
             if self.compute_errors and iteration % self.compute_errors == 0:
-                quantization_fig.update(iteration, self.quantization_error(data))
-                topology_fig.update(iteration, self.topology_error(data))
+                self.quantization_fig.update(iteration, self.quantization_error(data))
+                self.topology_fig.update(iteration, self.topology_error(data))
             iteration += 1
 
     def distance_map(self):
@@ -352,7 +362,6 @@ class DtwSom(Som):
         between them and using linear interpolation for compression."""
         # In the model adaptation the length of the new model vector sequence is determined first
         avg_length = int(0.5 + round(hm * M.shape[0] + hx * X.shape[0]))
-        # control for averages too far away... (Ugly hack...)
         if not ((M.shape[0] <= avg_length <= X.shape[0]) or (X.shape[0] <= avg_length <= M.shape[0])):
             raise ValueError("Something went wrong with averaging the time series. (hx:%s, hm:%s, l=%d)" % (hx, hm, avg_length))
         # then the matching vectors of the input Xt and old model vector sequence Mk
