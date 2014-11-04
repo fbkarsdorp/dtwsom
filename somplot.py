@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import matplotlib.gridspec as gridspec
 import numpy as np
-import seaborn as sbn
+import seaborn as sb
 
 
 class InteractivePlot(object):

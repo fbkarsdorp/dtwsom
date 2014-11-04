@@ -272,10 +272,10 @@ class Som(object):
                 points[i][j] = value[median_example(value, self.dtw_fn)]
         return grid_plot(points, self.x, self.y, normalize_scale, colors=colors)
 
-    def plot(self, t=0, what='prototypes', data=None, kind='grid', clusters=0, normalize_scale=True, fp="", close=False):
+    def plot(self, what='prototypes', data=None, kind='grid', clusters=0, normalize_scale=True, fp="", close=False):
         if kind == 'grid':
             if clusters:
-                colors = sb.color_palette("deep", clusters)
+                colors = sb.color_palette("deep", n_colors=clusters)
                 colors = [colors[c] for c in self._cluster(k=clusters)]
             else:
                 colors = None

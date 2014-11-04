@@ -34,7 +34,7 @@ for char in characters:
         chars.append(uniform_shrinking_to_length(char, 65))
     else:
         chars.append(char)
-chars = [np.array(char) for char in chars]
+chars = [char / np.linalg.norm(np.array(char)) for char in chars]
 
 def experiment(args):
     (x, y, sigma, sigma_end, eta, eta_end, decay_fn, 
