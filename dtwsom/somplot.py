@@ -67,7 +67,7 @@ def grid_plot(matrix, width, height, normalize_scale=False, colors=None):
         for j in range(height):
             ax = plt.Subplot(fig, outer_grid[cnt])
             if matrix[i][j] is not None:
-                sbn.tsplot(matrix[i][j], color=colors[cnt], ax=ax)
+                sb.tsplot(matrix[i][j], color=colors[cnt], ax=ax)
                 ax.set_xticks([])
                 ax.set_yticks([])
                 ax.set_ylim(-0.1, 1.1) 

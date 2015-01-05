@@ -3,24 +3,21 @@ from __future__ import division
 import cPickle
 import logging
 import math
-import random
 
 from collections import defaultdict
 from functools import partial
 from warnings import warn
 
 import matplotlib.pyplot as plt
-import matplotlib.cm as cm
 import numpy as np
-import pandas as pd
 import seaborn as sb
 
 from scipy.interpolate import interp1d
+from scipy.spatial.distance import cosine
 from sklearn.cluster import AgglomerativeClustering
 from sklearn.feature_extraction.image import grid_to_graph
 
-from dtw import dtw_distance, average_sequence
-from dgw.dtw.scaling import uniform_scaling_to_length, uniform_shrinking_to_length
+from dtw import dtw_distance
 from somplot import plot_distance_map, hinton, grid_plot, InteractivePlot
 
 
@@ -47,8 +44,8 @@ def exponential_decay(start, end, iterations, k=2):
     return iter(start * np.power(k, (np.arange(iterations) / float(iterations)) * np.log(end / start) * 1 / np.log(k)))
 
 class Som(object):
-    def __init__(self, x, y, input_len=0, sigma=None, sigma_end=None, eta=0.5, eta_end=0.01, 
-                 decay_fn="exponential", random_seed=None, n_iter=1000, intermediate_plots=False, 
+    def __init__(self, x, y, input_len=0, sigma=None, sigma_end=None, eta=0.5, eta_end=0.01,
+                 decay_fn="exponential", random_seed=None, n_iter=1000, intermediate_plots=False,
                  compute_errors=250):
 
         """Initializes a Self Organizing Maps.
@@ -91,7 +88,7 @@ class Som(object):
         return decay_fn(start, end, n_iter)
 
     def _activate(self, x):
-        """Updates matrix activation_map, in this matrix the element i,j 
+        """Updates matrix activation_map, in this matrix the element i,j
         is the response of the neuron i,j to x."""
         s = np.subtract(x, self.weights) # x - w
         it = np.nditer(self.activation_map, flags=['multi_index'])
@@ -132,7 +129,7 @@ class Som(object):
             it.iternext()
 
     def quantization(self, data):
-        """Assigns a code book (weights vector of the winning neuron) 
+        """Assigns a code book (weights vector of the winning neuron)
         to each sample in data."""
         q = np.zeros(data.shape)
         for i, x in enumerate(data):
@@ -155,7 +152,7 @@ class Som(object):
         "Trains the SOM picking samples at random from data."
         if self.compute_errors and not continuing:
             self.quantization_fig = InteractivePlot(0, "iterations", "quantization error")
-            self.topology_fig = InteractivePlot(1, "iterations", "topology error")            
+            self.topology_fig = InteractivePlot(1, "iterations", "topology error")
         for iteration in range(continuing, self.n_iter):
             logging.info('Iteration %d / %d' % (iteration + 1, self.n_iter))
             rand_i = self.random_generator.randint(len(data))
@@ -177,7 +174,7 @@ class Som(object):
         self.random_generator.shuffle(data)
         if self.compute_errors:
             self.quantization_fig = InteractivePlot(0, "iterations", "quantization error")
-            self.topology_fig = InteractivePlot(1, "iterations", "topology error") 
+            self.topology_fig = InteractivePlot(1, "iterations", "topology error")
         iteration = 0
         while iteration < self.n_iter:
             logging.info('Iteration %d / %d' % (iteration + 1, self.n_iter))
@@ -307,9 +304,56 @@ class Som(object):
         return model
 
 
+class VectorSom(Som):
+
+    def _activate(self, x):
+        it = np.nditer(self.activation_map, flags=['multi_index'])
+        while not it.finished:
+            self.activation_map[it.multi_index] = sum(
+                cosine(x[i], self.weights[it.multi_index][i]) for i in range(x.shape[0]))
+            it.iternext()
+
+    def _init_weights(self, x, y, input_len):
+        self.weights = []
+        for j in range(y):
+            n = [self.random_generator.rand(5, 200) * 2 - 1 for i in range(x)]
+            n = [v / np.linalg.norm(v) for v in n]
+            self.weights.append(n)
+        self.weights = np.array(self.weights)
+
+    def distance_map(self):
+        """Returns the average distance map of the weights.
+        (Each mean is normalized in order to sum up to 1)."""
+        um = np.zeros((self.weights.shape[0], self.weights.shape[1]))
+        it = np.nditer(um, flags=['multi_index'])
+        while not it.finished:
+            for ii in range(it.multi_index[0] - 1, it.multi_index[0] + 2):
+                for jj in range(it.multi_index[1] - 1, it.multi_index[1] + 2):
+                    if ii >= 0 and ii < self.weights.shape[0] and jj >= 0 and jj < self.weights.shape[1]:
+                        um[it.multi_index] += sum(
+                            cosine(self.weights[ii,jj][i], self.weights[it.multi_index][i])
+                            for i in range(self.weights[ii,jj].shape[0]))
+            it.iternext()
+        um = um / um.max()
+        return um
+
+    def distance_matrix(self, dist_fn=lambda a, b: np.linalg.norm(a - b)):
+        return super(VectorSom, self).distance_matrix(dist_fn=lambda u, v: sum(
+            cosine(u[i], v[i]) for i in range(u.shape[0])))
+
+    def quantization_error(self, data):
+        """Returns the quantization error computed as the average distance between
+        each input sample and its best matching unit."""
+        error = 0
+        for x in data:
+            i, j = self.winner(x)
+            error += sum(cosine(x[k], self.weights[i,j][k]) for k in range(x.shape[0]))
+        return error / len(data)
+
+
 class DtwSom(Som):
-    def __init__(self, x, y, sigma=None, sigma_end=0.5, eta=0.5, eta_end=0.01,  
-                 decay_fn="exponential", random_seed=None, n_iter=1000, intermediate_plots=False, 
+    def __init__(self, x, y, sigma=None, sigma_end=0.5, eta=0.5, eta_end=0.01,
+                 decay_fn="exponential", random_seed=None, n_iter=1000, intermediate_plots=False,
                  compute_errors=500, constraint='slanted_band', metric='seuclidean', window=5,
                  step_pattern=2, normalized=True, update_fn="som"):
 
@@ -334,7 +378,7 @@ class DtwSom(Som):
                 # make a new neuron with random signals of a random size
                 neuron = np.array(self.random_generator.randint(2, size=x.shape[0]), dtype=np.float)
                 self.weights[i][j] = neuron / np.linalg.norm(neuron)
-            # compute the distance between this neuron and the input 
+            # compute the distance between this neuron and the input
             self.activation_map[it.multi_index] = self.dtw_fn(self.weights[i][j], x)
             it.iternext()
 
@@ -343,7 +387,7 @@ class DtwSom(Som):
         sig = self.sigma_decay.next()
         logging.info('Eta = %.4f / Sigma = %.4f' % (eta, sig))
 
-        g = self.gaussian(win, sig) * eta        
+        g = self.gaussian(win, sig) * eta
         for i in range(self.x):
             for j in range(self.y):
                 h = g[i, j]
@@ -394,7 +438,7 @@ class DtwSom(Som):
         """Returns the quantization error computed as the average (normalized) distance between
         each input sample and its best matching unit."""
         error = 0.0
-        for x in data:        
+        for x in data:
             i, j = self.winner(x)
             error += self.dtw_fn(self.weights[i][j], x, normalized=True)
         return error / len(data)
